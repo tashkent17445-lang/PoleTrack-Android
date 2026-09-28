@@ -11,8 +11,8 @@ android {
         applicationId = "ru.poletrack.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildFeatures {
@@ -44,6 +44,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     implementation("org.maplibre.gl:android-sdk-vulkan-opengl:13.6.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
