@@ -29,5 +29,11 @@ data class RoutePoint(
     val createdAt: Long,
     val note: String,
     val tag: String,
+    val boxNumber: String,
     val extraMeters: Double
+)
+
+data class SearchHit(
+    val point: RoutePoint,
+    val routeName: String
 )
