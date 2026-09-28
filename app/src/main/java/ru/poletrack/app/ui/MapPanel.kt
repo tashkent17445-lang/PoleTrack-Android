@@ -61,7 +61,7 @@ fun MapPanel(
                 if (linePoints.size >= 2) {
                     map.addPolyline(
                         PolylineOptions()
-                            .add(linePoints.toTypedArray())
+                            .add(*linePoints.toTypedArray())
                             .color(Color.rgb(0, 122, 86))
                             .width(5f)
                     )

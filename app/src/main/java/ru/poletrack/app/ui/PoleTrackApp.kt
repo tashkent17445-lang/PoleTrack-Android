@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -69,7 +68,7 @@ private fun AppContent(
     requestLocationPermission: () -> Unit
 ) {
     var activeRoute by remember { mutableStateOf(db.getActiveRoute()) }
-    var points by remember { mutableStateOf(activeRoute?.let(db::getPoints).orEmpty()) }
+    var points by remember { mutableStateOf(activeRoute?.let { db.getPoints(it.id) }.orEmpty()) }
     var showNewRoute by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showPoints by remember { mutableStateOf(false) }
@@ -78,11 +77,11 @@ private fun AppContent(
 
     fun reload() {
         activeRoute = db.getActiveRoute()
-        points = activeRoute?.let(db::getPoints).orEmpty()
+        points = activeRoute?.let { db.getPoints(it.id) }.orEmpty()
     }
 
     LaunchedEffect(activeRoute?.id) {
-        points = activeRoute?.let(db::getPoints).orEmpty()
+        points = activeRoute?.let { db.getPoints(it.id) }.orEmpty()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
