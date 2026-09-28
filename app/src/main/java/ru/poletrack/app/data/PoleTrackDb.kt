@@ -5,7 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", null, 1) {
+class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -34,6 +34,7 @@ class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", 
                 created_at INTEGER NOT NULL,
                 note TEXT NOT NULL DEFAULT '',
                 tag TEXT NOT NULL DEFAULT '',
+                box_number TEXT NOT NULL DEFAULT '',
                 extra_m REAL NOT NULL DEFAULT 0,
                 FOREIGN KEY(route_id) REFERENCES routes(id) ON DELETE CASCADE
             )
@@ -42,7 +43,11 @@ class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", 
         db.execSQL("CREATE INDEX idx_route_points_route ON route_points(route_id, seq)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE route_points ADD COLUMN box_number TEXT NOT NULL DEFAULT ''")
+        }
+    }
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -81,6 +86,7 @@ class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", 
         longitude: Double,
         note: String = "",
         tag: String = "",
+        boxNumber: String = "",
         extraMeters: Double = 0.0
     ): RoutePoint {
         val sequence = nextSequence(routeId)
@@ -94,16 +100,24 @@ class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", 
             put("created_at", now)
             put("note", note)
             put("tag", tag)
+            put("box_number", boxNumber)
             put("extra_m", extraMeters)
         }
         val id = writableDatabase.insertOrThrow("route_points", null, values)
-        return RoutePoint(id, routeId, sequence, type, latitude, longitude, now, note, tag, extraMeters)
+        return RoutePoint(id, routeId, sequence, type, latitude, longitude, now, note, tag, boxNumber, extraMeters)
     }
 
-    fun updatePoint(pointId: Long, note: String, tag: String, extraMeters: Double) {
+    fun updatePoint(
+        pointId: Long,
+        note: String,
+        tag: String,
+        boxNumber: String,
+        extraMeters: Double
+    ) {
         val values = ContentValues().apply {
             put("note", note)
             put("tag", tag)
+            put("box_number", boxNumber)
             put("extra_m", extraMeters)
         }
         writableDatabase.update("route_points", values, "id=?", arrayOf(pointId.toString()))
@@ -127,21 +141,62 @@ class PoleTrackDb(context: Context) : SQLiteOpenHelper(context, "poletrack.db", 
             "seq ASC"
         ).use { c ->
             while (c.moveToNext()) {
-                out += RoutePoint(
-                    id = c.getLong(c.getColumnIndexOrThrow("id")),
-                    routeId = c.getLong(c.getColumnIndexOrThrow("route_id")),
-                    sequence = c.getInt(c.getColumnIndexOrThrow("seq")),
-                    type = PointType.valueOf(c.getString(c.getColumnIndexOrThrow("type"))),
-                    latitude = c.getDouble(c.getColumnIndexOrThrow("latitude")),
-                    longitude = c.getDouble(c.getColumnIndexOrThrow("longitude")),
-                    createdAt = c.getLong(c.getColumnIndexOrThrow("created_at")),
-                    note = c.getString(c.getColumnIndexOrThrow("note")),
-                    tag = c.getString(c.getColumnIndexOrThrow("tag")),
-                    extraMeters = c.getDouble(c.getColumnIndexOrThrow("extra_m"))
-                )
+                out += cursorToPoint(c)
             }
         }
         return out
+    }
+
+    fun searchPoints(query: String, limit: Int = 30): List<SearchHit> {
+        val cleaned = query.trim()
+        if (cleaned.isBlank()) return emptyList()
+
+        val simplifiedBox = cleaned
+            .replace(Regex("^ящик\\s*№?\\s*", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        val out = mutableListOf<SearchHit>()
+        readableDatabase.rawQuery(
+            """
+            SELECT p.*, r.name AS route_name
+            FROM route_points p
+            JOIN routes r ON r.id = p.route_id
+            WHERE p.type = ?
+            ORDER BY p.created_at DESC
+            """.trimIndent(),
+            arrayOf(PointType.POLE.name)
+        ).use { c ->
+            while (c.moveToNext() && out.size < limit) {
+                val point = cursorToPoint(c)
+                val routeName = c.getString(c.getColumnIndexOrThrow("route_name"))
+                val matches =
+                    point.boxNumber.contains(cleaned, ignoreCase = true) ||
+                    (simplifiedBox.isNotBlank() && point.boxNumber.contains(simplifiedBox, ignoreCase = true)) ||
+                    point.tag.contains(cleaned, ignoreCase = true) ||
+                    point.note.contains(cleaned, ignoreCase = true) ||
+                    routeName.contains(cleaned, ignoreCase = true)
+
+                if (matches) out += SearchHit(point, routeName)
+            }
+        }
+        return out
+    }
+
+    private fun cursorToPoint(c: android.database.Cursor): RoutePoint {
+        val boxIndex = c.getColumnIndex("box_number")
+        return RoutePoint(
+            id = c.getLong(c.getColumnIndexOrThrow("id")),
+            routeId = c.getLong(c.getColumnIndexOrThrow("route_id")),
+            sequence = c.getInt(c.getColumnIndexOrThrow("seq")),
+            type = PointType.valueOf(c.getString(c.getColumnIndexOrThrow("type"))),
+            latitude = c.getDouble(c.getColumnIndexOrThrow("latitude")),
+            longitude = c.getDouble(c.getColumnIndexOrThrow("longitude")),
+            createdAt = c.getLong(c.getColumnIndexOrThrow("created_at")),
+            note = c.getString(c.getColumnIndexOrThrow("note")),
+            tag = c.getString(c.getColumnIndexOrThrow("tag")),
+            boxNumber = if (boxIndex >= 0) c.getString(boxIndex) else "",
+            extraMeters = c.getDouble(c.getColumnIndexOrThrow("extra_m"))
+        )
     }
 
     private fun nextSequence(routeId: Long): Int {

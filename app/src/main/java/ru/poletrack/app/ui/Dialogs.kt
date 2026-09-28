@@ -1,5 +1,6 @@
 package ru.poletrack.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,7 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.poletrack.app.data.PoleTrackDb
+import ru.poletrack.app.data.Route
 import ru.poletrack.app.data.RoutePoint
+import ru.poletrack.app.data.SearchHit
+import ru.poletrack.app.search.AddressResult
 import ru.poletrack.app.util.RouteMath
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,7 +64,6 @@ internal fun NewRouteDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
                 OutlinedTextField(
                     value = spool,
                     onValueChange = { spool = it.filter(Char::isDigit) },
@@ -67,7 +71,6 @@ internal fun NewRouteDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
                 OutlinedTextField(
                     value = sag,
                     onValueChange = { sag = it },
@@ -75,7 +78,6 @@ internal fun NewRouteDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = startReserve,
@@ -105,9 +107,7 @@ internal fun NewRouteDialog(
                         endReserve.toDoubleOrNull() ?: 15.0
                     )
                 }
-            ) {
-                Text("Начать")
-            }
+            ) { Text("Начать") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
@@ -119,45 +119,48 @@ internal fun NewRouteDialog(
 internal fun PoleDialog(
     point: RoutePoint,
     onDismiss: () -> Unit,
-    onSave: (String, String, Double) -> Unit
+    onSave: (String, String, String, Double) -> Unit
 ) {
     var note by remember(point.id) { mutableStateOf(point.note) }
     var tag by remember(point.id) { mutableStateOf(point.tag) }
+    var boxNumber by remember(point.id) { mutableStateOf(point.boxNumber) }
     var extra by remember(point.id) {
-        mutableStateOf(
-            if (point.extraMeters == 0.0) "" else point.extraMeters.toString()
-        )
+        mutableStateOf(if (point.extraMeters == 0.0) "" else point.extraMeters.toString())
     }
 
     val presets = listOf(
+        "📦 Ящик",
         "⚠️ Может упасть",
-        "🔧 Сварка / муфта",
         "🌳 Ветки",
         "🚧 Переход дороги",
         "🪜 Нужна вышка",
-        "📦 Запас кабеля"
+        "🔧 Сварка",
+        "🧵 Запас кабеля"
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Комментарий к опоре") },
+        title = { Text("Опора") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    "Быстрая метка",
-                    style = MaterialTheme.typography.labelLarge
+                OutlinedTextField(
+                    value = boxNumber,
+                    onValueChange = { boxNumber = it },
+                    label = { Text("№ ящика") },
+                    placeholder = { Text("Например: 154") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
 
+                Text("Быстрая метка", style = MaterialTheme.typography.labelLarge)
                 presets.forEach { preset ->
                     OutlinedButton(
                         onClick = { tag = preset },
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(preset)
-                    }
+                    ) { Text(preset) }
                 }
 
                 OutlinedTextField(
@@ -171,9 +174,7 @@ internal fun PoleDialog(
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("Комментарий") },
-                    placeholder = {
-                        Text("Например: может упасть, тут сварка…")
-                    },
+                    placeholder = { Text("Например: может упасть, тут сварка…") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
@@ -193,12 +194,11 @@ internal fun PoleDialog(
                     onSave(
                         note.trim(),
                         tag.trim(),
+                        boxNumber.trim(),
                         extra.toDoubleOrNull() ?: 0.0
                     )
                 }
-            ) {
-                Text("Сохранить")
-            }
+            ) { Text("Сохранить") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Позже") }
@@ -209,7 +209,8 @@ internal fun PoleDialog(
 @Composable
 internal fun HistoryDialog(
     db: PoleTrackDb,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpen: (Route) -> Unit
 ) {
     val routes = remember { db.getRoutes() }
 
@@ -220,7 +221,7 @@ internal fun HistoryDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(420.dp)
+                    .height(460.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -229,26 +230,108 @@ internal fun HistoryDialog(
                     val geometry = RouteMath.geometryMeters(points)
                     val cable = RouteMath.estimatedCableMeters(route, points)
 
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpen(route) }
+                    ) {
                         Column(modifier = Modifier.padding(12.dp)) {
+                            Text(route.name, fontWeight = FontWeight.Bold)
+                            Text("Трасса ${geometry.roundToInt()} м · кабель ~${cable.roundToInt()} м")
                             Text(
-                                route.name,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "Трасса ${geometry.roundToInt()} м · кабель ~${cable.roundToInt()} м"
-                            )
-                            Text(
-                                if (route.isActive) "В работе" else "Завершена",
+                                if (route.isActive) "В работе · нажми, чтобы открыть" else "Завершена · нажми, чтобы открыть",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
                 }
 
-                if (routes.isEmpty()) {
-                    Text("История пока пустая")
+                if (routes.isEmpty()) Text("История пока пустая")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+@Composable
+internal fun SearchResultsDialog(
+    localResults: List<SearchHit>,
+    addressResults: List<AddressResult>,
+    loadingAddresses: Boolean,
+    onDismiss: () -> Unit,
+    onOpenPoint: (SearchHit) -> Unit,
+    onOpenAddress: (AddressResult) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Результаты поиска") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(500.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (localResults.isNotEmpty()) {
+                    Text("Свои метки и ящики", fontWeight = FontWeight.Bold)
+                    localResults.forEach { hit ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenPoint(hit) }
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                val title = if (hit.point.boxNumber.isNotBlank()) {
+                                    "Ящик №${hit.point.boxNumber}"
+                                } else {
+                                    "Опора ${hit.point.sequence}"
+                                }
+                                Text(title, fontWeight = FontWeight.SemiBold)
+                                Text(hit.routeName, style = MaterialTheme.typography.bodySmall)
+                                if (hit.point.tag.isNotBlank()) Text(hit.point.tag)
+                                if (hit.point.note.isNotBlank()) {
+                                    Text(hit.point.note, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
                 }
+
+                Text("Адреса", fontWeight = FontWeight.Bold)
+                if (loadingAddresses) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator()
+                        Text("Ищу адрес…")
+                    }
+                } else if (addressResults.isEmpty()) {
+                    Text("Адресов не найдено", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    addressResults.forEach { result ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenAddress(result) }
+                        ) {
+                            Text(
+                                result.displayName,
+                                modifier = Modifier.padding(10.dp),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
+                if (localResults.isEmpty() && !loadingAddresses && addressResults.isEmpty()) {
+                    Text("Ничего не найдено")
+                }
+
+                Text(
+                    "Поиск адресов: OpenStreetMap",
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
         },
         confirmButton = {
