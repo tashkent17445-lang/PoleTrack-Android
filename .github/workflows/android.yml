@@ -22,11 +22,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android 37 SDK
-        run: sdkmanager "platforms;android-37"
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37"
 
       - name: Gradle 9.6
         uses: gradle/actions/setup-gradle@v4
