@@ -18,16 +18,25 @@ import ru.poletrack.app.data.RoutePoint
 
 private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty"
 
+data class MapFocus(
+    val latitude: Double,
+    val longitude: Double,
+    val label: String,
+    val token: Long = System.nanoTime()
+)
+
 @Suppress("DEPRECATION")
 @Composable
 fun MapPanel(
     points: List<RoutePoint>,
     currentLocation: Location?,
+    routeKey: Long?,
+    focus: MapFocus?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val mapView = remember(context) { MapView(context).also { it.onCreate(null) } }
-    val firstCameraTarget = remember { mutableMapOf<String, Boolean>() }
+    val cameraState = remember { mutableMapOf<String, Any?>() }
 
     DisposableEffect(mapView) {
         mapView.onStart()
@@ -71,9 +80,16 @@ fun MapPanel(
                     val title = when (point.type) {
                         PointType.START -> "Старт"
                         PointType.FINISH -> "Финиш"
-                        PointType.POLE -> "Опора ${point.sequence}"
+                        PointType.POLE -> {
+                            if (point.boxNumber.isNotBlank()) {
+                                "Ящик №${point.boxNumber}"
+                            } else {
+                                "Опора ${point.sequence}"
+                            }
+                        }
                     }
-                    val snippet = listOf(point.tag, point.note)
+                    val poleInfo = if (point.type == PointType.POLE) "Опора ${point.sequence}" else ""
+                    val snippet = listOf(poleInfo, point.tag, point.note)
                         .filter { it.isNotBlank() }
                         .joinToString(" · ")
                     map.addMarker(
@@ -90,20 +106,46 @@ fun MapPanel(
                             .position(LatLng(location.latitude, location.longitude))
                             .title("Вы здесь")
                     )
-                    if (firstCameraTarget.putIfAbsent("done", true) == null && points.isEmpty()) {
+                }
+
+                focus?.let { target ->
+                    map.addMarker(
+                        MarkerOptions()
+                            .position(LatLng(target.latitude, target.longitude))
+                            .title(target.label)
+                    )
+                    if (cameraState["focusToken"] != target.token) {
+                        cameraState["focusToken"] = target.token
                         map.cameraPosition = CameraPosition.Builder()
-                            .target(LatLng(location.latitude, location.longitude))
+                            .target(LatLng(target.latitude, target.longitude))
+                            .zoom(17.5)
+                            .build()
+                    }
+                }
+
+                if (focus == null && routeKey != null && cameraState["routeKey"] != routeKey) {
+                    cameraState["routeKey"] = routeKey
+                    points.lastOrNull()?.let { last ->
+                        map.cameraPosition = CameraPosition.Builder()
+                            .target(LatLng(last.latitude, last.longitude))
                             .zoom(16.5)
                             .build()
                     }
                 }
 
-                if (points.isNotEmpty() && firstCameraTarget.putIfAbsent("route", true) == null) {
-                    val last = points.last()
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(LatLng(last.latitude, last.longitude))
-                        .zoom(16.5)
-                        .build()
+                if (
+                    focus == null &&
+                    routeKey == null &&
+                    points.isEmpty() &&
+                    cameraState["initialLocation"] != true
+                ) {
+                    currentLocation?.let { location ->
+                        cameraState["initialLocation"] = true
+                        map.cameraPosition = CameraPosition.Builder()
+                            .target(LatLng(location.latitude, location.longitude))
+                            .zoom(16.5)
+                            .build()
+                    }
                 }
             }
         }
